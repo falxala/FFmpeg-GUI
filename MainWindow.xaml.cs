@@ -176,6 +176,12 @@ namespace FfmpegInstallerApp
 
                 using (var process = Process.Start(startInfo))
                 {
+                    //nullチェック
+                    if (process == null)
+                    {
+                        throw new Exception($"圧縮解除ツール '{SEVEN_ZA_EXE_RELATIVE_PATH}' の起動に失敗しました。Process が null です。");
+                    }
+
                     var outputTask = process.StandardOutput.ReadToEndAsync();
                     var errorTask = process.StandardError.ReadToEndAsync();
 
