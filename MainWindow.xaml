@@ -5,21 +5,61 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:FfmpegInstallerApp"
         mc:Ignorable="d"
-        Title="FFmpeg Downloader" Height="200" Width="450">
-    <!-- ボタン削除で高さも調整 -->
+        Title="FFmpeg Downloader" Height="600" Width="800">
+    <!-- 高さと幅を拡張 -->
     <Grid Margin="15">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
+            <!-- FFmpeg Status -->
+            <RowDefinition Height="Auto"/>
+            <!-- ProgressBar -->
+            <RowDefinition Height="10"/>
+            <!-- Spacer -->
+            <RowDefinition Height="Auto"/>
+            <!-- Input Buttons -->
             <RowDefinition Height="*"/>
+            <!-- File List -->
+            <RowDefinition Height="Auto"/>
+            <!-- List Controls -->
+            <RowDefinition Height="Auto"/>
+            <!-- Conversion Controls (将来用) -->
         </Grid.RowDefinitions>
 
+        <!-- FFmpeg Status & ProgressBar (前回までと同じ) -->
         <TextBlock x:Name="StatusTextBlock" Grid.Row="0" TextWrapping="Wrap" 
                    Margin="0,0,0,10" VerticalAlignment="Top" HorizontalAlignment="Left"
                    Text="FFmpegの存在を確認中..."/>
-
         <ProgressBar x:Name="DownloadProgressBar" Grid.Row="1" Height="20" Margin="0,5,0,5"
                      Minimum="0" Maximum="100" Value="0" Visibility="Collapsed"/>
 
-        <!-- ダウンロードボタンは削除します -->
+        <!-- ファイル入力コントロール -->
+        <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,10,0,10">
+            <Button x:Name="SelectFileButton" Content="ファイルを選択..." Click="SelectFileButton_Click" Width="120" Height="30" Margin="0,0,10,0"/>
+            <Button x:Name="SelectFolderButton" Content="フォルダを選択..." Click="SelectFolderButton_Click" Width="120" Height="30" Margin="0,0,10,0"/>
+        </StackPanel>
+
+        <!-- ドロップ領域とファイルリスト -->
+        <Border Grid.Row="4" BorderBrush="LightGray" BorderThickness="1" CornerRadius="5" Padding="5" 
+                AllowDrop="True" Drop="FileList_Drop" DragOver="FileList_DragOver" Margin="0,0,0,10">
+            <ListView x:Name="FileList" ItemsSource="{Binding SourceFiles}" SelectionMode="Multiple">
+                <ListView.View>
+                    <GridView>
+                        <GridViewColumn Header="ファイル名" DisplayMemberBinding="{Binding FileName}"/>
+                        <GridViewColumn Header="フルパス" DisplayMemberBinding="{Binding FullPath}" Width="300"/>
+                    </GridView>
+                </ListView.View>
+            </ListView>
+        </Border>
+
+        <!-- リスト操作ボタン -->
+        <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button x:Name="RemoveSelectedButton" Content="選択を削除" Click="RemoveSelectedButton_Click" Width="100" Height="30" Margin="0,0,10,0"/>
+            <Button x:Name="ClearListButton" Content="全てクリア" Click="ClearListButton_Click" Width="100" Height="30"/>
+        </StackPanel>
+
+        <!-- 将来の変換コントロール（プレースホルダー） -->
+        <StackPanel Grid.Row="6" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,20,0,0">
+            <Button Content="変換開始 (未実装)" Width="150" Height="40" IsEnabled="False"/>
+        </StackPanel>
     </Grid>
 </Window>
