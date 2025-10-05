@@ -1,384 +1,365 @@
-﻿using System;
+﻿// MainWindow.xaml.cs
+
+using ffmpeg.Models;
+using ffmpeg.Services;
+using Microsoft.Win32;
+using Ookii.Dialogs.Wpf;
+using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
-using System.Net.Http;
+using System.Text; // StringBuilder のために必要
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Input;
-using Microsoft.Win32;
-using Ookii.Dialogs.Wpf; // Ookii.Dialogs.Wpf を使用
+using System.Windows.Data;
 
-namespace FfmpegInstallerApp
+namespace ffmpeg
 {
-    // リストに表示するファイル情報を保持するクラス
-    public class SourceFileInfo
-    {
-        // Nullable参照型エラーを回避するため、プロパティを初期化
-        public string FileName { get; set; } = string.Empty;
-        public string FullPath { get; set; } = string.Empty;
-
-        // Equalsメソッドのシグネチャを object? に修正
-        public override bool Equals(object? obj)
-        {
-            return obj is SourceFileInfo info &&
-                   FullPath == info.FullPath;
-        }
-
-        public override int GetHashCode()
-        {
-            return HashCode.Combine(FullPath);
-        }
-    }
-
     public partial class MainWindow : Window
     {
-        // FFmpegのダウンロードURL (Gyan's Builds の full 版は7z形式)
-        private const string FFMPEG_DOWNLOAD_URL = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-full.7z";
-        // アプリケーションの実行ディレクトリからのFFmpegルートディレクトリの相対パス
-        private const string FFMPEG_ROOT_DIR_RELATIVE = "ffmpeg";
-        // FFmpegルートディレクトリからのffmpeg.exeの相対パス
-        private const string FFMPEG_EXE_RELATIVE_PATH = "bin\\ffmpeg.exe";
-        // アプリケーションの実行ディレクトリからの7za.exeの相対パス
-        private const string SEVEN_ZA_EXE_RELATIVE_PATH = "Tools\\7za.exe";
+        private readonly FfmpegManager _ffmpegManager;
+        private readonly FileListManager _fileListManager;
+        private CancellationTokenSource? _globalConversionCts; // 全体キャンセルトークン
 
-        // ffmpeg.exe が存在するディレクトリのフルパス
-        private string _ffmpegBinDirectory;
-        // ffmpeg.exe のフルパス
-        private string _ffmpegExePath;
-        // 7za.exe のフルパス
-        private string _sevenZaExePath;
-
-        // 入力ファイルリスト (UIと同期)
-        public ObservableCollection<SourceFileInfo> SourceFiles { get; set; }
+        // 同時実行数を制限するためのSemaphoreSlim
+        private static readonly SemaphoreSlim _conversionSemaphore = new SemaphoreSlim(Environment.ProcessorCount > 1 ? Environment.ProcessorCount - 1 : 1); // CPUコア数-1、最小1
 
         public MainWindow()
         {
             InitializeComponent();
+            _ffmpegManager = new FfmpegManager();
+            _fileListManager = new FileListManager(_ffmpegManager);
+            FileList.ItemsSource = _fileListManager.SourceFiles;
 
-            // パスを初期化
-            string appDirectory = AppDomain.CurrentDomain.BaseDirectory;
-            _ffmpegBinDirectory = Path.Combine(appDirectory, FFMPEG_ROOT_DIR_RELATIVE, "bin");
-            _ffmpegExePath = Path.Combine(_ffmpegBinDirectory, "ffmpeg.exe");
-            _sevenZaExePath = Path.Combine(appDirectory, SEVEN_ZA_EXE_RELATIVE_PATH);
-
-            // ObservableCollectionを初期化し、ListViewにバインド
-            SourceFiles = new ObservableCollection<SourceFileInfo>();
-            FileList.ItemsSource = SourceFiles;
-
-            // アプリ起動時にFFmpegの存在チェックとダウンロードを非同期で実行
             Loaded += MainWindow_Loaded;
+            OutputFolderTextBox.Text = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyVideos), "Converted");
+            FFmpegOutputLog.Text = ""; // ログTextBoxを初期化
         }
 
         private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
         {
-            await CheckInitialState();
+            await CheckAndPrepareFfmpeg();
         }
 
-        private async Task CheckInitialState()
+        private void StartConversionButton_Click(object sender, RoutedEventArgs e)
         {
-            DownloadProgressBar.Visibility = Visibility.Collapsed;
-
-            StatusTextBlock.Text = "必要なツールの確認をしています...";
-
-            if (!File.Exists(_sevenZaExePath))
+            if (_globalConversionCts != null && !_globalConversionCts.IsCancellationRequested)
             {
-                StatusTextBlock.Text = $"エラー: 圧縮解除ツールが見つかりません。\n" +
-                                       $"7-Zipのコマンドラインバージョン(7za.exe)をダウンロードし、\n" +
-                                       $"アプリケーションの実行ディレクトリ内の 'Tools' フォルダに配置してください。\n" +
-                                       $"期待されるパス: '{Path.Combine(AppDomain.CurrentDomain.BaseDirectory, SEVEN_ZA_EXE_RELATIVE_PATH)}'";
-                MessageBox.Show($"'{SEVEN_ZA_EXE_RELATIVE_PATH}' が見つかりません。アプリケーションを終了します。", "エラー", MessageBoxButton.OK, MessageBoxImage.Error);
-                Application.Current.Shutdown();
+                this.Dispatcher.Invoke(() =>
+                {
+                    StatusTextBlock.Text = "変換をキャンセルしています...";
+                    StartConversionButton.IsEnabled = false;
+                    StartConversionButton.Content = "キャンセル中...";
+                });
+                _globalConversionCts.Cancel();
                 return;
             }
 
-            StatusTextBlock.Text = "FFmpegの存在を確認しています...";
+            _globalConversionCts = new CancellationTokenSource();
+            Task.Run(() => StartConversion(_globalConversionCts.Token));
+        }
 
-            if (File.Exists(_ffmpegExePath))
-            {
-                StatusTextBlock.Text = $"FFmpegが見つかりました: {_ffmpegExePath}\n変換機能を使用できます。";
-            }
-            else
-            {
-                MessageBoxResult result = MessageBox.Show(
-                    "FFmpegが見つかりませんでした。今すぐダウンロードして配置しますか？",
-                    "FFmpegのダウンロード確認",
-                    MessageBoxButton.YesNo,
-                    MessageBoxImage.Question);
+        private async Task StartConversion(CancellationToken globalCancellationToken)
+        {
+            this.Dispatcher.Invoke(() => SetUiForConversion(true));
+            this.Dispatcher.Invoke(() => FFmpegOutputLog.Clear()); // 新しい変換セッションごとにログをクリア
 
-                if (result == MessageBoxResult.Yes)
+            string outputFolder = "";
+            List<SourceFileInfo> filesToProcess = new List<SourceFileInfo>();
+
+            this.Dispatcher.Invoke(() =>
+            {
+                outputFolder = OutputFolderTextBox.Text;
+                filesToProcess = _fileListManager.SourceFiles
+                                    .Where(f => f.IsSelected && f.Status != "エラー" && f.Status != "プロブ失敗")
+                                    .ToList();
+
+                // 各ファイルのStatusをリセット
+                foreach (var fileInfo in _fileListManager.SourceFiles)
                 {
-                    StatusTextBlock.Text = $"FFmpegをダウンロード＆配置します...";
+                    if (fileInfo.IsSelected && fileInfo.Status != "エラー" && fileInfo.Status != "プロブ失敗")
+                    {
+                        fileInfo.Status = "待機中";
+                    }
+                    else if (!fileInfo.IsSelected)
+                    {
+                        fileInfo.Status = "選択解除";
+                    }
+                }
+
+                StatusTextBlock.Text = $"{filesToProcess.Count}個のファイルの変換を開始します...";
+            });
+
+            if (string.IsNullOrWhiteSpace(outputFolder) || !filesToProcess.Any())
+            {
+                this.Dispatcher.Invoke(() => MessageBox.Show("変換するファイルを選択し、出力先を指定してください。", "情報", MessageBoxButton.OK, MessageBoxImage.Information));
+                this.Dispatcher.Invoke(() => SetUiForConversion(false));
+                return;
+            }
+
+            if (!Directory.Exists(outputFolder))
+            {
+                try
+                {
+                    Directory.CreateDirectory(outputFolder);
+                }
+                catch (Exception ex)
+                {
+                    this.Dispatcher.Invoke(() => MessageBox.Show($"出力フォルダの作成に失敗しました: {ex.Message}", "エラー", MessageBoxButton.OK, MessageBoxImage.Error));
+                    this.Dispatcher.Invoke(() => SetUiForConversion(false));
+                    return;
+                }
+            }
+
+            int completedCount = 0;
+            var runningTasks = new List<Task>();
+
+            foreach (var fileInfo in filesToProcess)
+            {
+                if (globalCancellationToken.IsCancellationRequested)
+                {
+                    this.Dispatcher.Invoke(() => { fileInfo.Status = "キャンセル"; });
+                    continue;
+                }
+
+                // FFmpeg生出力をログTextBoxに追記するためのコールバック
+                Action<string> outputLogCallback = (log) =>
+                {
+                    // Dispatcher.Invoke を使用してUIスレッドでログを追記
+                    this.Dispatcher.Invoke(() =>
+                    {
+                        FFmpegOutputLog.AppendText(log);
+                        FFmpegOutputLog.ScrollToEnd(); // 自動スクロール
+                    });
+                };
+
+                await _conversionSemaphore.WaitAsync(globalCancellationToken);
+                runningTasks.Add(Task.Run(async () =>
+                {
                     try
                     {
-                        await DownloadAndExtractFfmpeg();
-                        StatusTextBlock.Text = "FFmpegのダウンロードと配置が完了しました！\n変換機能を使用できます。";
+                        string originalFileName = Path.GetFileNameWithoutExtension(fileInfo.FileName);
+                        string extension = ".mp4";
+                        string outputPathForFile = Path.Combine(outputFolder, $"{originalFileName}{extension}");
+                        int counter = 1;
+                        while (File.Exists(outputPathForFile))
+                        {
+                            outputPathForFile = Path.Combine(outputFolder, $"{originalFileName} ({counter++}){extension}");
+                        }
+
+                        this.Dispatcher.Invoke(() => { fileInfo.Status = "変換中..."; });
+
+                        await _ffmpegManager.ConvertFileAsync(fileInfo, outputPathForFile, outputLogCallback, globalCancellationToken);
+
+                        if (!globalCancellationToken.IsCancellationRequested)
+                        {
+                            this.Dispatcher.Invoke(() => { fileInfo.Status = "完了"; });
+                        }
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        this.Dispatcher.Invoke(() => { fileInfo.Status = "キャンセル"; });
+                        outputLogCallback($"[{fileInfo.FileName}] 変換がキャンセルされました。{Environment.NewLine}");
                     }
                     catch (Exception ex)
                     {
-                        StatusTextBlock.Text = $"FFmpegのダウンロード中にエラーが発生しました: {ex.Message}";
-                        MessageBox.Show($"エラー: {ex.Message}\n詳細: {ex.StackTrace}", "エラー", MessageBoxButton.OK, MessageBoxImage.Error);
-                        Application.Current.Shutdown();
-                    }
-                }
-                else
-                {
-                    StatusTextBlock.Text = "FFmpegがダウンロードされませんでした。アプリケーションを終了します。";
-                    MessageBox.Show("FFmpegがないため、アプリケーションは機能しません。", "終了", MessageBoxButton.OK, MessageBoxImage.Information);
-                    Application.Current.Shutdown();
-                }
-            }
-        }
-
-        private async Task DownloadAndExtractFfmpeg()
-        {
-            string appDirectory = AppDomain.CurrentDomain.BaseDirectory;
-            string downloadFilePath = Path.Combine(appDirectory, "ffmpeg.7z");
-            string extractDirectory = Path.Combine(appDirectory, FFMPEG_ROOT_DIR_RELATIVE);
-
-            if (Directory.Exists(extractDirectory))
-            {
-                StatusTextBlock.Text = $"既存のFFmpegディレクトリ ({extractDirectory}) を削除しています...";
-                Directory.Delete(extractDirectory, true);
-                await Task.Delay(100);
-            }
-            Directory.CreateDirectory(extractDirectory);
-
-            StatusTextBlock.Text = $"FFmpegをダウンロード中: {FFMPEG_DOWNLOAD_URL}...";
-            DownloadProgressBar.Value = 0;
-            DownloadProgressBar.Visibility = Visibility.Visible;
-
-            using (HttpClient client = new HttpClient())
-            {
-                using (var response = await client.GetAsync(FFMPEG_DOWNLOAD_URL, HttpCompletionOption.ResponseHeadersRead))
-                {
-                    response.EnsureSuccessStatusCode();
-                    var totalBytes = response.Content.Headers.ContentLength;
-                    using (var contentStream = await response.Content.ReadAsStreamAsync())
-                    {
-                        using (var fileStream = new FileStream(downloadFilePath, FileMode.Create, FileAccess.Write, FileShare.None, 8192, true))
+                        this.Dispatcher.Invoke(() =>
                         {
-                            var buffer = new byte[8192];
-                            long receivedBytes = 0;
-                            int bytesRead;
-                            while ((bytesRead = await contentStream.ReadAsync(buffer, 0, buffer.Length)) > 0)
-                            {
-                                await fileStream.WriteAsync(buffer, 0, bytesRead);
-                                receivedBytes += bytesRead;
-                                if (totalBytes.HasValue)
-                                {
-                                    double progress = (double)receivedBytes / totalBytes.Value * 100;
-                                    Application.Current.Dispatcher.Invoke(() =>
-                                    {
-                                        DownloadProgressBar.Value = progress;
-                                        StatusTextBlock.Text = $"ダウンロード中: {progress:F2}% ({receivedBytes}/{totalBytes.Value} バイト)";
-                                    });
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            DownloadProgressBar.Visibility = Visibility.Collapsed;
+                            fileInfo.Status = "エラー";
+                            outputLogCallback($"[{fileInfo.FileName}] 変換中にエラーが発生しました: {ex.Message}{Environment.NewLine}");
 
-            StatusTextBlock.Text = "FFmpegを解凍中 (7za.exeを使用)...";
+                            var result = MessageBox.Show(
+                                $"{fileInfo.FileName} の変換中にエラーが発生しました。\n\n詳細: {ex.Message}\n\n変換を続行しますか？",
+                                "変換エラー", MessageBoxButton.YesNo, MessageBoxImage.Error);
+                            if (result == MessageBoxResult.No)
+                            {
+                                // 全体キャンセルをトリガー
+                                globalCancellationToken.ThrowIfCancellationRequested();
+                            }
+                        });
+                    }
+                    finally
+                    {
+                        _conversionSemaphore.Release();
+                        this.Dispatcher.Invoke(() => { /* 何もしない */ }); // UI更新のため、Invokeを介してCompletedCountを更新
+                        Interlocked.Increment(ref completedCount); // 完了したタスク数をスレッドセーフにインクリメント
+                        this.Dispatcher.Invoke(() =>
+                        {
+                            StatusTextBlock.Text = $"変換中: {completedCount}/{filesToProcess.Count} 個完了..."; // 全体進捗をステータステキストで表現
+                        });
+                    }
+                }, globalCancellationToken));
+            }
 
             try
             {
-                var startInfo = new System.Diagnostics.ProcessStartInfo
+                await Task.WhenAll(runningTasks);
+            }
+            catch (OperationCanceledException)
+            {
+                // グローバルキャンセルがタスク内に伝播してTask.WhenAllがキャンセルされた場合
+            }
+
+            this.Dispatcher.Invoke(() =>
+            {
+                if (globalCancellationToken.IsCancellationRequested)
                 {
-                    FileName = _sevenZaExePath,
-                    Arguments = $"x \"{downloadFilePath}\" -o\"{extractDirectory}\" -y",
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                    StandardOutputEncoding = System.Text.Encoding.UTF8,
-                    StandardErrorEncoding = System.Text.Encoding.UTF8
-                };
-
-                using (var process = System.Diagnostics.Process.Start(startInfo))
-                {
-                    // WaitForExitAsyncを使うために、プロセスがnullでないことを確認
-                    if (process == null) throw new InvalidOperationException("プロセスの開始に失敗しました。");
-
-                    var outputTask = process.StandardOutput.ReadToEndAsync();
-                    var errorTask = process.StandardError.ReadToEndAsync();
-
-                    await process.WaitForExitAsync();
-
-                    string output = await outputTask;
-                    string error = await errorTask;
-
-                    if (process.ExitCode != 0)
-                    {
-                        throw new Exception($"圧縮解除ツール '{SEVEN_ZA_EXE_RELATIVE_PATH}' の実行中にエラーが発生しました。\n出力:\n{output}\nエラー:\n{error}");
-                    }
-                    StatusTextBlock.Text += $"\n圧縮解除ツール出力:\n{output}";
+                    StatusTextBlock.Text = "変換がキャンセルされました。";
                 }
-            }
-            catch (Exception ex)
-            {
-                throw new Exception($"圧縮解除ツール '{SEVEN_ZA_EXE_RELATIVE_PATH}' の実行に失敗しました。", ex);
-            }
-
-            if (File.Exists(downloadFilePath))
-            {
-                File.Delete(downloadFilePath);
-            }
-
-            string[] extractedSubDirs = Directory.GetDirectories(extractDirectory);
-            if (extractedSubDirs.Length == 1)
-            {
-                string innerDir = extractedSubDirs[0];
-
-                foreach (string entryPath in Directory.GetFileSystemEntries(innerDir))
+                else
                 {
-                    string entryName = Path.GetFileName(entryPath);
-                    string destPath = Path.Combine(extractDirectory, entryName);
-
-                    if (File.Exists(entryPath))
+                    int actualCompletedCount = _fileListManager.SourceFiles.Count(f => f.IsSelected && f.Status == "完了");
+                    if (actualCompletedCount == filesToProcess.Count)
                     {
-                        File.Move(entryPath, destPath);
+                        StatusTextBlock.Text = "すべての変換が完了しました。";
                     }
-                    else if (Directory.Exists(entryPath))
+                    else
                     {
-                        if (Directory.Exists(destPath))
-                        {
-                            Directory.Delete(destPath, true);
-                        }
-                        Directory.Move(entryPath, destPath);
+                        StatusTextBlock.Text = $"変換が終了しました。{actualCompletedCount}/{filesToProcess.Count} 個完了 (一部エラーまたはキャンセル)。";
                     }
                 }
-                Directory.Delete(innerDir, true);
-            }
+            });
 
-            if (File.Exists(_ffmpegExePath))
-            {
-                StatusTextBlock.Text += $"\nffmpeg.exe が '{_ffmpegExePath}' に見つかりました。";
-            }
-            else
-            {
-                StatusTextBlock.Text += $"\nffmpeg.exe が '{_ffmpegExePath}' に見つかりませんでした。ディレクトリ構造を確認してください。";
-            }
+            this.Dispatcher.Invoke(() => SetUiForConversion(false));
+            _globalConversionCts?.Dispose();
+            _globalConversionCts = null;
         }
 
-        // ======================================================
-        // ファイル入力関連のメソッド
-        // ======================================================
+        // --- UIの状態を切り替えるメソッド ---
+        private void SetUiForConversion(bool isConverting)
+        {
+            SelectFileButton.IsEnabled = !isConverting;
+            SelectFolderButton.IsEnabled = !isConverting;
+            FileList.IsEnabled = !isConverting;
+            RemoveSelectedButton.IsEnabled = !isConverting;
+            ClearListButton.IsEnabled = !isConverting;
+            SelectOutputFolderButton.IsEnabled = !isConverting;
+            OutputFolderTextBox.IsEnabled = !isConverting;
 
+            StartConversionButton.Content = isConverting ? "変換中止" : "変換開始";
+            StartConversionButton.IsEnabled = true;
+            // プログレスバーは削除されたため、ここでの処理は不要
+        }
+
+        // --- ファイル入力イベントハンドラ ---
         private void SelectFileButton_Click(object sender, RoutedEventArgs e)
         {
-            OpenFileDialog openFileDialog = new OpenFileDialog();
-            openFileDialog.Multiselect = true;
-            openFileDialog.Filter = "動画・音声ファイル|*.mp4;*.mkv;*.avi;*.mov;*.wmv;*.flv;*.webm;*.mpg;*.ts;*.m2ts;*.vob;*.wav;*.mp3;*.aac;*.flac;*.ogg|すべてのファイル|*.*";
-
+            var openFileDialog = new OpenFileDialog { Multiselect = true, Filter = "メディアファイル|*.mp4;*.mkv;*.avi;*.mov;*.wmv;*.flv;*.webm;*.mpg;*.ts;*.m2ts;*.vob;*.wav;*.mp3;*.aac;*.flac;*.ogg|すべてのファイル|*.*" };
             if (openFileDialog.ShowDialog() == true)
             {
-                AddFilesToList(openFileDialog.FileNames);
+                Task.Run(() => _fileListManager.AddFilesAsync(openFileDialog.FileNames));
             }
         }
 
         private void SelectFolderButton_Click(object sender, RoutedEventArgs e)
         {
-            var dialog = new VistaFolderBrowserDialog();
-            dialog.Description = "ファイルが含まれるフォルダを選択してください";
-            dialog.UseDescriptionForTitle = true;
-
+            var dialog = new VistaFolderBrowserDialog { Description = "フォルダを選択してください", UseDescriptionForTitle = true };
             if (dialog.ShowDialog(this) == true)
             {
-                AddFolderToList(dialog.SelectedPath);
+                Task.Run(() => _fileListManager.AddFolderAsync(dialog.SelectedPath));
             }
-        }
-
-        private void FileList_DragOver(object sender, DragEventArgs e)
-        {
-            if (e.Data.GetDataPresent(DataFormats.FileDrop))
-            {
-                e.Effects = DragDropEffects.Copy;
-            }
-            else
-            {
-                e.Effects = DragDropEffects.None;
-            }
-            e.Handled = true;
         }
 
         private void FileList_Drop(object sender, DragEventArgs e)
         {
-            // "DataRegions" を "DataFormats" に修正
-            if (e.Data.GetDataPresent(DataFormats.FileDrop))
+            if (e.Data.GetData(DataFormats.FileDrop) is string[] droppedItems)
             {
-                string[]? droppedItems = e.Data.GetData(DataFormats.FileDrop) as string[];
-                if (droppedItems != null)
+                Task.Run(async () =>
                 {
                     foreach (string item in droppedItems)
                     {
-                        if (File.Exists(item))
-                        {
-                            AddFilesToList(new string[] { item });
-                        }
-                        else if (Directory.Exists(item))
-                        {
-                            AddFolderToList(item);
-                        }
+                        if (File.Exists(item)) await _fileListManager.AddFilesAsync(new[] { item });
+                        else if (Directory.Exists(item)) await _fileListManager.AddFolderAsync(item);
                     }
+                });
+            }
+        }
+
+        private void SelectOutputFolderButton_Click(object sender, RoutedEventArgs e)
+        {
+            var dialog = new VistaFolderBrowserDialog { Description = "出力先フォルダを選択してください", UseDescriptionForTitle = true, SelectedPath = OutputFolderTextBox.Text };
+            if (dialog.ShowDialog(this) == true)
+            {
+                OutputFolderTextBox.Text = dialog.SelectedPath;
+            }
+        }
+
+        private async Task CheckAndPrepareFfmpeg()
+        {
+            // プログレスバーは削除されたため、Visibility設定は不要
+            StatusTextBlock.Text = "必要なツールの確認をしています...";
+
+            if (!_ffmpegManager.CheckSevenZaExists())
+            {
+                HandleError($"圧縮解除ツールが見つかりません。'Tools'フォルダに'7za.exe'を配置してください。\n期待されるパス: {_ffmpegManager.SevenZaExePath}", true);
+                return;
+            }
+
+            if (_ffmpegManager.CheckFfmpegExists())
+            {
+                StatusTextBlock.Text = $"FFmpegの準備ができています。\nパス: {_ffmpegManager.FfmpegExePath}";
+            }
+            else
+            {
+                var result = MessageBox.Show("FFmpegが見つかりませんでした。今すぐダウンロードして配置しますか？", "FFmpegのダウンロード確認", MessageBoxButton.YesNo, MessageBoxImage.Question);
+                if (result == MessageBoxResult.Yes)
+                {
+                    try
+                    {
+                        var statusProgress = new Progress<string>(status => this.Dispatcher.Invoke(() => StatusTextBlock.Text = status));
+                        var downloadProgress = new Progress<double>(progress =>
+                        {
+                            this.Dispatcher.Invoke(() =>
+                            {
+                                // ダウンロード進捗をStatusTextBlockで表示（プログレスバーはないため）
+                                StatusTextBlock.Text = $"FFmpegダウンロード中: {progress:F1}%";
+                            });
+                        });
+                        // プログレスバーは削除されたため、Visible設定は不要
+                        await _ffmpegManager.DownloadAndExtractFfmpegAsync(statusProgress, downloadProgress);
+                        StatusTextBlock.Text = "FFmpegのダウンロードと配置が完了しました！";
+                    }
+                    catch (Exception ex)
+                    {
+                        HandleError($"FFmpegのダウンロード中にエラーが発生しました: {ex.Message}", true);
+                    }
+                }
+                else
+                {
+                    HandleError("FFmpegがないため、アプリケーションは機能しません。", true);
                 }
             }
         }
 
+        private void SelectAllCheckBox_Checked(object sender, RoutedEventArgs e)
+        {
+            foreach (var fileInfo in _fileListManager.SourceFiles) fileInfo.IsSelected = true;
+        }
+        private void SelectAllCheckBox_Unchecked(object sender, RoutedEventArgs e)
+        {
+            foreach (var fileInfo in _fileListManager.SourceFiles) fileInfo.IsSelected = false;
+        }
+        private void FileList_DragOver(object sender, DragEventArgs e)
+        {
+            e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None;
+            e.Handled = true;
+        }
         private void RemoveSelectedButton_Click(object sender, RoutedEventArgs e)
         {
-            var selectedItems = FileList.SelectedItems.Cast<SourceFileInfo>().ToList();
-            foreach (var item in selectedItems)
-            {
-                SourceFiles.Remove(item);
-            }
+            _fileListManager.RemoveItems(_fileListManager.SourceFiles.Where(f => f.IsSelected).ToList());
         }
-
         private void ClearListButton_Click(object sender, RoutedEventArgs e)
         {
-            SourceFiles.Clear();
+            _fileListManager.ClearAll();
         }
-
-
-
-        private void AddFilesToList(IEnumerable<string> filePaths)
+        private void HandleError(string message, bool shutdown = false)
         {
-            foreach (string filePath in filePaths)
-            {
-                string[] supportedExtensions = { ".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm", ".mpg", ".ts", ".m2ts", ".vob", ".wav", ".mp3", ".aac", ".flac", ".ogg" };
-                if (supportedExtensions.Contains(Path.GetExtension(filePath).ToLowerInvariant()))
-                {
-                    SourceFileInfo newFile = new SourceFileInfo
-                    {
-                        FileName = Path.GetFileName(filePath),
-                        FullPath = filePath
-                    };
-                    if (!SourceFiles.Any(f => f.FullPath.Equals(newFile.FullPath, StringComparison.OrdinalIgnoreCase)))
-                    {
-                        SourceFiles.Add(newFile);
-                    }
-                }
-            }
-        }
-
-        private void AddFolderToList(string folderPath)
-        {
-            try
-            {
-                string[] allFiles = Directory.GetFiles(folderPath, "*.*", SearchOption.AllDirectories);
-                AddFilesToList(allFiles);
-            }
-            catch (UnauthorizedAccessException)
-            {
-                MessageBox.Show("アクセスが拒否されました。このフォルダのファイルを読み取ることができません。", "アクセスエラー", MessageBoxButton.OK, MessageBoxImage.Warning);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"フォルダの読み込み中にエラーが発生しました: {ex.Message}", "エラー", MessageBoxButton.OK, MessageBoxImage.Error);
-            }
+            StatusTextBlock.Text = $"エラー: {message}";
+            MessageBox.Show(message, "エラー", MessageBoxButton.OK, MessageBoxImage.Error);
+            if (shutdown) Application.Current.Shutdown();
         }
     }
 }
