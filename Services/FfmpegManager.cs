@@ -7,7 +7,6 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Net.Http;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -17,85 +16,115 @@ namespace ffmpeg.Services
 {
     public class FfmpegManager
     {
-        private const string FFMPEG_DOWNLOAD_URL = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-full.7z";
         private const string FFMPEG_ROOT_DIR_RELATIVE = "ffmpeg";
-        private const string FFMPEG_EXE_RELATIVE_PATH = "bin\\ffmpeg.exe";
         private const string SEVEN_ZA_EXE_RELATIVE_PATH = "Tools\\7za.exe";
 
-        public string FfmpegExePath { get; }
-        public string FfprobeExePath { get; }
+        public string? FfmpegExePath { get; private set; }
+        public string? FfprobeExePath { get; private set; }
         public string SevenZaExePath { get; }
         private string AppDirectory { get; }
 
         public FfmpegManager()
         {
             AppDirectory = AppDomain.CurrentDomain.BaseDirectory;
-            string ffmpegBinDir = Path.Combine(AppDirectory, FFMPEG_ROOT_DIR_RELATIVE, "bin");
-            FfmpegExePath = Path.Combine(ffmpegBinDir, "ffmpeg.exe");
-            FfprobeExePath = Path.Combine(ffmpegBinDir, "ffprobe.exe");
             SevenZaExePath = Path.Combine(AppDirectory, SEVEN_ZA_EXE_RELATIVE_PATH);
         }
 
-        public bool CheckSevenZaExists() => File.Exists(SevenZaExePath);
-        public bool CheckFfmpegExists() => File.Exists(FfmpegExePath) && File.Exists(FfprobeExePath);
-
-        public async Task DownloadAndExtractFfmpegAsync(IProgress<string> statusProgress, IProgress<double> downloadProgress)
+        /// <summary>
+        /// アプリケーションディレクトリ内、または環境変数PATHからFFmpegを探します。
+        /// </summary>
+        /// <returns>見つかったffmpeg.exeのパス。見つからない場合はnull。</returns>
+        public string? LocateFfmpeg()
         {
-            string downloadFilePath = Path.Combine(AppDirectory, "ffmpeg.7z");
+            // 1. アプリケーションのサブディレクトリ内をチェック (推奨)
+            string localFfmpegDir = Path.Combine(AppDirectory, FFMPEG_ROOT_DIR_RELATIVE, "bin");
+            string localFfmpegPath = Path.Combine(localFfmpegDir, "ffmpeg.exe");
+            string localFfprobePath = Path.Combine(localFfmpegDir, "ffprobe.exe");
+
+            if (File.Exists(localFfmpegPath) && File.Exists(localFfprobePath))
+            {
+                FfmpegExePath = localFfmpegPath;
+                FfprobeExePath = localFfprobePath;
+                return FfmpegExePath;
+            }
+
+            // 2. 環境変数 PATH をチェック
+            var pathVariable = Environment.GetEnvironmentVariable("PATH");
+            if (pathVariable != null)
+            {
+                foreach (var path in pathVariable.Split(Path.PathSeparator))
+                {
+                    try
+                    {
+                        string potentialFfmpegPath = Path.Combine(path, "ffmpeg.exe");
+                        string potentialFfprobePath = Path.Combine(path, "ffprobe.exe");
+                        if (File.Exists(potentialFfmpegPath) && File.Exists(potentialFfprobePath))
+                        {
+                            FfmpegExePath = potentialFfmpegPath;
+                            FfprobeExePath = potentialFfprobePath;
+                            return FfmpegExePath;
+                        }
+                    }
+                    catch (ArgumentException)
+                    {
+                        // Path.Combineで無効なパス文字が含まれている場合など
+                    }
+                }
+            }
+
+            // 見つからなかった場合
+            FfmpegExePath = null;
+            FfprobeExePath = null;
+            return null;
+        }
+
+
+        public bool CheckSevenZaExists() => File.Exists(SevenZaExePath);
+        public bool CheckFfmpegExists() => !string.IsNullOrEmpty(FfmpegExePath) && !string.IsNullOrEmpty(FfprobeExePath) && File.Exists(FfmpegExePath) && File.Exists(FfprobeExePath);
+
+        /// <summary>
+        /// ユーザーが指定したアーカイブファイルを解凍し、アプリケーションフォルダ内に配置します。
+        /// </summary>
+        public async Task ExtractFfmpegArchiveAsync(string archivePath, IProgress<string> statusProgress)
+        {
             string extractDirectory = Path.Combine(AppDirectory, FFMPEG_ROOT_DIR_RELATIVE);
 
             if (Directory.Exists(extractDirectory))
             {
                 statusProgress.Report($"既存のFFmpegディレクトリを削除しています...");
                 Directory.Delete(extractDirectory, true);
-                await Task.Delay(100);
+                await Task.Delay(100); // UIが更新される猶予
             }
             Directory.CreateDirectory(extractDirectory);
 
-            statusProgress.Report($"FFmpegをダウンロード中...");
-            using (var client = new HttpClient())
-            {
-                using var response = await client.GetAsync(FFMPEG_DOWNLOAD_URL, HttpCompletionOption.ResponseHeadersRead);
-                response.EnsureSuccessStatusCode();
-                var totalBytes = response.Content.Headers.ContentLength;
-                using var contentStream = await response.Content.ReadAsStreamAsync();
-                using var fileStream = new FileStream(downloadFilePath, FileMode.Create, FileAccess.Write, FileShare.None, 8192, true);
+            statusProgress.Report("アーカイブを解凍中...");
+            await RunSevenZaAsync(archivePath, extractDirectory);
 
-                var buffer = new byte[8192];
-                long receivedBytes = 0;
-                int bytesRead;
-                while ((bytesRead = await contentStream.ReadAsync(buffer, 0, buffer.Length)) > 0)
-                {
-                    await fileStream.WriteAsync(buffer, 0, bytesRead);
-                    receivedBytes += bytesRead;
-                    if (totalBytes.HasValue)
-                    {
-                        double progress = (double)receivedBytes / totalBytes.Value * 100;
-                        downloadProgress.Report(progress);
-                    }
-                }
-            }
-            downloadProgress.Report(0);
-
-            statusProgress.Report("FFmpegを解凍中...");
-            await RunSevenZaAsync(downloadFilePath, extractDirectory);
-
-            if (File.Exists(downloadFilePath)) File.Delete(downloadFilePath);
-
+            // 解凍後のディレクトリ整理
+            // gyan.devのビルドは 'ffmpeg-xxxx-full_build' のような一段深いフォルダが作られるため、中身をルートに移動させる
             string[] extractedSubDirs = Directory.GetDirectories(extractDirectory);
             if (extractedSubDirs.Length == 1)
             {
+                statusProgress.Report("ファイルを移動中...");
                 string innerDir = extractedSubDirs[0];
                 foreach (string entryPath in Directory.GetFileSystemEntries(innerDir))
                 {
                     string entryName = Path.GetFileName(entryPath);
                     string destPath = Path.Combine(extractDirectory, entryName);
-                    if (File.Exists(entryPath)) File.Move(entryPath, destPath);
-                    else if (Directory.Exists(entryPath)) Directory.Move(entryPath, destPath);
+                    if (File.Exists(entryPath))
+                    {
+                        File.Move(entryPath, destPath);
+                    }
+                    else if (Directory.Exists(entryPath))
+                    {
+                        Directory.Move(entryPath, destPath);
+                    }
                 }
                 Directory.Delete(innerDir, true);
             }
+            statusProgress.Report("展開完了。");
         }
+
 
         private async Task RunSevenZaAsync(string archivePath, string destinationPath)
         {
@@ -128,9 +157,10 @@ namespace ffmpeg.Services
         {
             if (!CheckFfmpegExists())
             {
-                throw new FileNotFoundException("ffmpeg.exeが見つかりません。");
+                throw new FileNotFoundException("ffmpeg.exeまたはffprobe.exeが見つかりません。アプリケーションを再起動して設定してください。");
             }
 
+            // ... (以降の処理は変更なし)
             bool IsValidCodec(string? codec)
             {
                 if (string.IsNullOrEmpty(codec)) return false;
@@ -148,7 +178,6 @@ namespace ffmpeg.Services
             }
 
             var arguments = new StringBuilder();
-            // ★★★ 変更点：進捗報告用の引数を追加 ★★★
             arguments.Append("-progress pipe:2 ");
 
             arguments.Append($"-i \"{fileToConvert.FullPath}\" ");
@@ -160,7 +189,7 @@ namespace ffmpeg.Services
             string fullArguments = arguments.ToString();
 
             outputLogCallback($"--- {fileToConvert.FileName} の変換開始 ---{Environment.NewLine}");
-            outputLogCallback($"コマンド: ffmpeg {fullArguments}{Environment.NewLine}");
+            outputLogCallback($"コマンド: {Path.GetFileName(FfmpegExePath)} {fullArguments}{Environment.NewLine}");
 
             var startInfo = new ProcessStartInfo
             {
@@ -210,6 +239,7 @@ namespace ffmpeg.Services
         {
             if (!CheckFfmpegExists()) return null;
 
+            // ... (以降の処理は変更なし)
             string arguments = $"-v quiet -print_format json -show_format -show_streams \"{filePath}\"";
             var startInfo = new ProcessStartInfo
             {

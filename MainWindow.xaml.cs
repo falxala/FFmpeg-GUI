@@ -2,6 +2,7 @@
 
 using ffmpeg.Models;
 using ffmpeg.Services;
+using MaterialDesignThemes.Wpf;
 using Microsoft.Win32;
 using Ookii.Dialogs.Wpf;
 using System;
@@ -16,6 +17,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Documents;
 
 namespace ffmpeg
 {
@@ -47,6 +49,145 @@ namespace ffmpeg
         {
             await CheckAndPrepareFfmpeg();
         }
+        private async Task CheckAndPrepareFfmpeg()
+        {
+            StatusTextBlock.Text = "FFmpegの場所を確認しています...";
+            SetUiEnabled(false);
+
+            if (!_ffmpegManager.CheckSevenZaExists())
+            {
+                HandleError($"圧縮解除ツールが見つかりません。'Tools'フォルダに'7za.exe'を配置してください。\n期待されるパス: {_ffmpegManager.SevenZaExePath}", true);
+                return;
+            }
+
+            string? ffmpegPath = _ffmpegManager.LocateFfmpeg();
+
+            if (!string.IsNullOrEmpty(ffmpegPath))
+            {
+                StatusTextBlock.Text = $"FFmpegの準備ができています。\nパス: {ffmpegPath}";
+                SetUiEnabled(true);
+            }
+            else
+            {
+                // カスタムダイアログを表示
+                var dialogResult = await ShowFfmpegSetupDialogAsync();
+
+                if (dialogResult is bool b && b) // [アーカイブを選択] がクリックされた場合
+                {
+                    var openFileDialog = new OpenFileDialog
+                    {
+                        Title = "ダウンロードしたFFmpegのアーカイブファイルを選択してください",
+                        Filter = "アーカイブファイル|*.zip;*.7z|すべてのファイル|*.*"
+                    };
+
+                    if (openFileDialog.ShowDialog() == true)
+                    {
+                        try
+                        {
+                            var statusProgress = new Progress<string>(status => Dispatcher.Invoke(() => StatusTextBlock.Text = status));
+                            await _ffmpegManager.ExtractFfmpegArchiveAsync(openFileDialog.FileName, statusProgress);
+
+                            ffmpegPath = _ffmpegManager.LocateFfmpeg();
+                            if (!string.IsNullOrEmpty(ffmpegPath))
+                            {
+                                StatusTextBlock.Text = $"FFmpegの配置が完了しました！\nパス: {ffmpegPath}";
+                                SetUiEnabled(true);
+                            }
+                            else
+                            {
+                                HandleError("FFmpegの展開に失敗したか、アーカイブの構造が予期されたものではありません。手動で配置してください。", true);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            HandleError($"FFmpegの展開中にエラーが発生しました: {ex.Message}", true);
+                        }
+                    }
+                    else
+                    {
+                        HandleError("ファイル選択がキャンセルされました。アプリケーションを終了します。", true);
+                    }
+                }
+                else // ダイアログが閉じられた、または [終了] がクリックされた場合
+                {
+                    HandleError("FFmpegが配置されなかったため、アプリケーションを終了します。", true);
+                }
+            }
+        }
+
+        // ★★★ FFmpegセットアップ用のカスタムダイアログを表示するメソッドを新規追加 ★★★
+        private Task<object?> ShowFfmpegSetupDialogAsync()
+        {
+            // ダイアログに表示するコンテンツを作成 (以前と同じ)
+            var textBlock = new TextBlock { Margin = new Thickness(0, 0, 0, 16), TextWrapping = TextWrapping.Wrap };
+            textBlock.Inlines.Add(new Run("FFmpegが見つかりませんでした。\nこのアプリケーションを動作させるには、FFmpegが必要です。\n\n"));
+            textBlock.Inlines.Add(new Run("以下のWebサイトからFFmpegをダウンロードしてください。\n" +
+                                        "(通常は 'ffmpeg-release-full.7z' や 'ffmpeg-master-latest-win64-gpl-shared.zip' などを推奨します)\n\n")
+            { FontWeight = FontWeights.Bold }); textBlock.Inlines.Add(new Run("推奨ダウンロード先 (クリックで開きます):\n"));
+
+            var gyanLink = new Hyperlink(new Run("  - Gyan.dev: https://www.gyan.dev/ffmpeg/builds/\n")) { NavigateUri = new Uri("https://www.gyan.dev/ffmpeg/builds/") };
+            gyanLink.RequestNavigate += (sender, args) => Process.Start(new ProcessStartInfo(args.Uri.AbsoluteUri) { UseShellExecute = true });
+            textBlock.Inlines.Add(gyanLink);
+
+            var btbNLink = new Hyperlink(new Run("  - BtbN/FFmpeg-Builds: https://github.com/BtbN/FFmpeg-Builds/releases\n\n")) { NavigateUri = new Uri("https://github.com/BtbN/FFmpeg-Builds/releases") };
+            btbNLink.RequestNavigate += (sender, args) => Process.Start(new ProcessStartInfo(args.Uri.AbsoluteUri) { UseShellExecute = true });
+            textBlock.Inlines.Add(btbNLink);
+
+            textBlock.Inlines.Add(new Run("ダウンロード完了後、下の [アーカイブを選択] ボタンをクリックして、\nダウンロードしたアーカイブ (.7z または .zip) を選択してください。\n自動でアプリケーションフォルダ内に展開・設定します。"));
+
+            var mainPanel = new StackPanel { Margin = new Thickness(24) };
+            mainPanel.Children.Add(new TextBlock { Text = "FFmpegのセットアップが必要です", Style = (Style)FindResource("MaterialDesignHeadline6TextBlock"), Margin = new Thickness(0, 0, 0, 8) });
+            mainPanel.Children.Add(textBlock);
+
+            var buttonPanel = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 16, 0, 0) };
+
+            var selectButton = new Button { Content = "アーカイブを選択", Style = (Style)FindResource("MaterialDesignRaisedButton"), Command = DialogHost.CloseDialogCommand };
+            selectButton.CommandParameter = true;
+
+            var cancelButton = new Button { Content = "終了", Style = (Style)FindResource("MaterialDesignFlatButton"), Margin = new Thickness(8, 0, 0, 0), Command = DialogHost.CloseDialogCommand };
+            cancelButton.CommandParameter = false;
+
+            buttonPanel.Children.Add(cancelButton);
+            buttonPanel.Children.Add(selectButton);
+            mainPanel.Children.Add(buttonPanel);
+
+            // TaskCompletionSourceを使って、イベントベースの処理をawait可能にする
+            var tcs = new TaskCompletionSource<object?>();
+
+            DialogClosingEventHandler? eventHandler = null;
+            eventHandler = (sender, args) =>
+            {
+                // ダイアログが閉じる際に、結果をTaskCompletionSourceに設定する
+                tcs.TrySetResult(args.Parameter);
+
+                // イベントハンドラを解除してメモリリークを防ぐ
+                if (eventHandler != null)
+                {
+                    RootDialogHost.DialogClosing -= eventHandler;
+                }
+            };
+
+            // イベントを購読
+            RootDialogHost.DialogClosing += eventHandler;
+
+            // ダイアログのコンテンツを設定し、開く
+            RootDialogHost.DialogContent = mainPanel;
+            RootDialogHost.IsOpen = true;
+
+            // 結果が設定されるまで待機するTaskを返す
+            return tcs.Task;
+        }
+
+        /// <summary>
+        /// FFmpegの準備状態に応じてUIの有効/無効を切り替えます。
+        /// </summary>
+        private void SetUiEnabled(bool isEnabled)
+        {
+            StartConversionButton.IsEnabled = isEnabled;
+            SelectFileButton.IsEnabled = isEnabled;
+            SelectFolderButton.IsEnabled = isEnabled;
+            FileList.AllowDrop = isEnabled; // ドラッグ＆ドロップも制御
+        }
 
         private void StartConversionButton_Click(object sender, RoutedEventArgs e)
         {
@@ -67,6 +208,7 @@ namespace ffmpeg
 
         private async Task StartConversion(CancellationToken globalCancellationToken)
         {
+            // ... (以降のメソッドは変更なし)
             this.Dispatcher.Invoke(() => SetUiForConversion(true));
             this.Dispatcher.Invoke(() => FFmpegOutputLog.Clear());
             UpdateOverallProgress(true);
@@ -136,7 +278,6 @@ namespace ffmpeg
                         fileInfo.Status = "変換中...";
                     });
 
-                    // ★★★ ここからが修正されたログ処理コールバック ★★★
                     Action<string> outputLogCallback = (log) =>
                     {
                         this.Dispatcher.Invoke(() =>
@@ -150,29 +291,24 @@ namespace ffmpeg
 
                                     string trimmedLine = line.Trim();
 
-                                    // 1. 内部処理用の進捗行か？
                                     if (trimmedLine.StartsWith("out_time"))
                                     {
                                         HandleProgressLine(trimmedLine);
                                     }
-                                    // 2. 表示したい進捗行か？
                                     else if (trimmedLine.Contains("frame=") && trimmedLine.Contains("speed="))
                                     {
                                         FFmpegOutputLog.AppendText(trimmedLine + Environment.NewLine);
                                         FFmpegOutputLog.ScrollToEnd();
                                     }
-                                    // 3. 表示したい開始/終了行か？
                                     else if (trimmedLine.StartsWith("---"))
                                     {
                                         FFmpegOutputLog.AppendText(trimmedLine + Environment.NewLine);
                                         FFmpegOutputLog.ScrollToEnd();
                                     }
-                                    // 4. 上記以外は無視
                                 }
                             }
                         });
                     };
-                    // ★★★ ここまで ★★★
 
                     await _ffmpegManager.ConvertFileAsync(fileInfo, outputPathForFile, outputLogCallback, globalCancellationToken);
 
@@ -309,26 +445,20 @@ namespace ffmpeg
             if (dialog.ShowDialog(this) == true) { OutputFolderTextBox.Text = dialog.SelectedPath; }
         }
 
-        private async Task CheckAndPrepareFfmpeg()
+        private void OpenSettingsButton_Click(object sender, RoutedEventArgs e)
         {
-            StatusTextBlock.Text = "必要なツールの確認をしています...";
-            if (!_ffmpegManager.CheckSevenZaExists()) { HandleError($"圧縮解除ツールが見つかりません。'Tools'フォルダに'7za.exe'を配置してください。\n期待されるパス: {_ffmpegManager.SevenZaExePath}", true); return; }
-            if (_ffmpegManager.CheckFfmpegExists()) { StatusTextBlock.Text = $"FFmpegの準備ができています。\nパス: {_ffmpegManager.FfmpegExePath}"; }
-            else
+            SettingsOverlay.Visibility = Visibility.Visible;
+        }
+
+        private void CloseSettingsButton_Click(object sender, RoutedEventArgs e)
+        {
+            SettingsOverlay.Visibility = Visibility.Collapsed;
+        }
+        private void SettingsOverlay_MouseDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            if (e.OriginalSource == sender)
             {
-                var result = MessageBox.Show("FFmpegが見つかりませんでした。今すぐダウンロードして配置しますか？", "FFmpegのダウンロード確認", MessageBoxButton.YesNo, MessageBoxImage.Question);
-                if (result == MessageBoxResult.Yes)
-                {
-                    try
-                    {
-                        var statusProgress = new Progress<string>(status => this.Dispatcher.Invoke(() => StatusTextBlock.Text = status));
-                        var downloadProgress = new Progress<double>(progress => { this.Dispatcher.Invoke(() => { StatusTextBlock.Text = $"FFmpegダウンロード中: {progress:F1}%"; }); });
-                        await _ffmpegManager.DownloadAndExtractFfmpegAsync(statusProgress, downloadProgress);
-                        StatusTextBlock.Text = "FFmpegのダウンロードと配置が完了しました！";
-                    }
-                    catch (Exception ex) { HandleError($"FFmpegのダウンロード中にエラーが発生しました: {ex.Message}", true); }
-                }
-                else { HandleError("FFmpegがないため、アプリケーションは機能しません。", true); }
+                SettingsOverlay.Visibility = Visibility.Collapsed;
             }
         }
 
@@ -337,6 +467,14 @@ namespace ffmpeg
         private void FileList_DragOver(object sender, DragEventArgs e) { e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None; e.Handled = true; }
         private void RemoveSelectedButton_Click(object sender, RoutedEventArgs e) { _fileListManager.RemoveItems(_fileListManager.SourceFiles.Where(f => f.IsSelected).ToList()); }
         private void ClearListButton_Click(object sender, RoutedEventArgs e) { _fileListManager.ClearAll(); }
-        private void HandleError(string message, bool shutdown = false) { StatusTextBlock.Text = $"エラー: {message}"; MessageBox.Show(message, "エラー", MessageBoxButton.OK, MessageBoxImage.Error); if (shutdown) Application.Current.Shutdown(); }
+        private void HandleError(string message, bool shutdown = false)
+        {
+            StatusTextBlock.Text = $"エラー: {message}";
+            MessageBox.Show(message, "エラー", MessageBoxButton.OK, MessageBoxImage.Error);
+            if (shutdown)
+            {
+                Application.Current.Shutdown();
+            }
+        }
     }
 }

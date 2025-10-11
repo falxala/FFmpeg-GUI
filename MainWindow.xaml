@@ -5,7 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:materialDesign="http://materialdesigninxaml.net/winfx/xaml/themes"
         mc:Ignorable="d"
-        Title="FFmpeg GUI" Height="700" Width="900"
+        Title="FFmpeg GUI" Height="850" Width="900"
         TextElement.Foreground="{DynamicResource MaterialDesignBody}"
         TextElement.FontWeight="Regular"
         TextElement.FontSize="13"
@@ -15,158 +15,234 @@
         FontFamily="{DynamicResource MaterialDesignFont}"
         Style="{DynamicResource MaterialDesignWindow}">
 
-    <Grid Margin="16">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <!-- Status Text -->
-            <RowDefinition Height="Auto"/>
-            <!-- Overall Progress Text -->
-            <RowDefinition Height="Auto"/>
-            <!-- Current File Progress Bar -->
-            <RowDefinition Height="20"/>
-            <!-- Spacer -->
-            <RowDefinition Height="Auto"/>
-            <!-- Input Buttons -->
-            <RowDefinition Height="*"/>
-            <!-- File List -->
-            <RowDefinition Height="Auto"/>
-            <!-- List Controls -->
-            <RowDefinition Height="20"/>
-            <!-- Spacer -->
-            <RowDefinition Height="Auto"/>
-            <!-- Conversion Controls -->
-            <RowDefinition Height="10"/>
-            <!-- Spacer -->
-            <RowDefinition Height="150"/>
-            <!-- FFmpeg Output Log -->
-        </Grid.RowDefinitions>
+    <!-- DialogHostをウィンドウのルートに配置 -->
+    <materialDesign:DialogHost x:Name="RootDialogHost" Identifier="RootDialogHost">
 
-        <!-- ステータス表示をCardで囲み、テーマのプライマリカラーを背景にする -->
-        <materialDesign:Card Grid.Row="0"
-                             Background="{DynamicResource {x:Static SystemColors.ControlLightLightBrushKey}}"
-                             Padding="10"
-                             Margin="0,0,0,10"
-                             UniformCornerRadius="4">
-            <TextBlock x:Name="StatusTextBlock"
-                       Style="{DynamicResource MaterialDesignSubtitle1TextBlock}"
-                       Foreground="{DynamicResource {x:Static SystemColors.ControlDarkDarkBrushKey}}"
-                       HorizontalAlignment="Center"
-                       Text="FFmpegの存在を確認中..." FontWeight="Bold" />
-        </materialDesign:Card>
+        <Grid x:Name="RootGrid">
 
-        <TextBlock x:Name="OverallProgressTextBlock" Grid.Row="1"
-                   Margin="0,0,0,10"
-                   Style="{DynamicResource MaterialDesignHeadline6TextBlock}"
-                   Text="全体進捗: 0/0 (0%)"/>
+            <!-- ===== メインコンテンツ ===== -->
+            <Grid Margin="16">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <!-- Status Text -->
+                    <RowDefinition Height="Auto"/>
+                    <!-- Overall Progress Text -->
+                    <RowDefinition Height="Auto"/>
+                    <!-- Current File Progress Bar -->
+                    <RowDefinition Height="20"/>
+                    <!-- Spacer -->
+                    <RowDefinition Height="Auto"/>
+                    <!-- Input Buttons -->
+                    <RowDefinition Height="*"/>
+                    <!-- File List -->
+                    <RowDefinition Height="Auto"/>
+                    <!-- List Controls -->
+                    <RowDefinition Height="70"/>
+                    <!-- Conversion Controls -->
+                    <RowDefinition Height="10"/>
+                    <!-- Spacer -->
+                    <RowDefinition Height="150"/>
+                    <!-- FFmpeg Output Log -->
+                </Grid.RowDefinitions>
 
-        <Grid x:Name="CurrentFileProgressGrid" Grid.Row="2" Margin="0,5,0,5" Visibility="Collapsed">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="Auto"/>
-            </Grid.ColumnDefinitions>
-            <TextBlock Grid.Column="0" Text="現在のファイル進捗: " VerticalAlignment="Center" Margin="0,0,10,0"/>
-            <ProgressBar x:Name="CurrentFileProgressBar" Grid.Column="1" VerticalAlignment="Center" Height="10" Background="#FFECECEC" Cursor=""/>
-            <TextBlock x:Name="CurrentFileProgressTextBlock" Grid.Column="2" Text="0.0%" VerticalAlignment="Center" Margin="10,0,0,0" MinWidth="40"/>
-        </Grid>
+                <!-- ステータス表示 -->
+                <materialDesign:Card Grid.Row="0"
+                                     Background="{DynamicResource {x:Static SystemColors.ControlLightLightBrushKey}}"
+                                     Padding="10"
+                                     Margin="0,0,0,10"
+                                     UniformCornerRadius="4">
+                    <TextBlock x:Name="StatusTextBlock"
+                               Style="{DynamicResource MaterialDesignSubtitle1TextBlock}"
+                               Foreground="{DynamicResource {x:Static SystemColors.ControlDarkDarkBrushKey}}"
+                               HorizontalAlignment="Center"
+                               Text="FFmpegの存在を確認中..." FontWeight="Bold" />
+                </materialDesign:Card>
 
-        <StackPanel Grid.Row="4" Orientation="Horizontal" Margin="0,0,0,10">
-            <Button x:Name="SelectFileButton" Click="SelectFileButton_Click" Margin="0,0,8,0"
-                    Style="{DynamicResource MaterialDesignOutlinedButton}">
-                <StackPanel Orientation="Horizontal">
-                    <materialDesign:PackIcon Kind="File" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                    <TextBlock Text="ファイルを選択"/>
-                </StackPanel>
-            </Button>
-            <Button x:Name="SelectFolderButton" Click="SelectFolderButton_Click" Margin="0,0,8,0"
-                    Style="{DynamicResource MaterialDesignOutlinedButton}">
-                <StackPanel Orientation="Horizontal">
-                    <materialDesign:PackIcon Kind="Folder" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                    <TextBlock Text="フォルダを選択"/>
-                </StackPanel>
-            </Button>
-        </StackPanel>
+                <TextBlock x:Name="OverallProgressTextBlock" Grid.Row="1" Margin="0,0,0,10" Style="{DynamicResource MaterialDesignHeadline6TextBlock}" Text="全体進捗: 0/0 (0%)"/>
 
-        <materialDesign:Card Grid.Row="5" UniformCornerRadius="8" Padding="0"
-                             AllowDrop="True" Drop="FileList_Drop" DragOver="FileList_DragOver" Margin="0,0,0,10">
-            <DataGrid x:Name="FileList" ItemsSource="{Binding SourceFiles}" SelectionMode="Extended"
-                      AutoGenerateColumns="False" CanUserAddRows="False" CanUserResizeRows="False"
-                      materialDesign:DataGridAssist.CellPadding="13 8 8 8"
-                      materialDesign:DataGridAssist.ColumnHeaderPadding="8"
-                      IsReadOnly="True" Background="White">
-                <DataGrid.Columns>
-                    <DataGridTemplateColumn>
-                        <DataGridTemplateColumn.Header>
-                            <CheckBox x:Name="SelectAllCheckBox" 
-                                      Checked="SelectAllCheckBox_Checked" 
-                                      Unchecked="SelectAllCheckBox_Unchecked" />
-                        </DataGridTemplateColumn.Header>
-                        <DataGridTemplateColumn.CellTemplate>
-                            <DataTemplate>
-                                <TextBlock HorizontalAlignment="Center">
-                                    <CheckBox IsChecked="{Binding IsSelected, UpdateSourceTrigger=PropertyChanged}" 
-                                              VerticalAlignment="Center"/>
-                                </TextBlock>
-                            </DataTemplate>
-                        </DataGridTemplateColumn.CellTemplate>
-                    </DataGridTemplateColumn>
-                    <DataGridTextColumn Header="ファイル名" Binding="{Binding FileName}" Width="200"/>
-                    <DataGridTextColumn Header="時間" Binding="{Binding Duration}" Width="80"/>
-                    <DataGridTextColumn Header="映像コーデック" Binding="{Binding VideoCodec}" Width="100"/>
-                    <DataGridTextColumn Header="音声コーデック" Binding="{Binding AudioCodec}" Width="100"/>
-                    <DataGridTextColumn Header="状態" Binding="{Binding Status}" Width="150"/>
-                    <DataGridTextColumn Header="フルパス" Binding="{Binding FullPath}" Width="*"/>
-                </DataGrid.Columns>
-            </DataGrid>
-        </materialDesign:Card>
+                <Grid x:Name="CurrentFileProgressGrid" Grid.Row="2" Margin="0,5,0,5" Visibility="Collapsed">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Text="現在のファイル進捗: " VerticalAlignment="Center" Margin="0,0,10,0"/>
+                    <ProgressBar x:Name="CurrentFileProgressBar" Grid.Column="1" VerticalAlignment="Center" Height="10" Background="#FFECECEC" Cursor=""/>
+                    <TextBlock x:Name="CurrentFileProgressTextBlock" Grid.Column="2" Text="0.0%" VerticalAlignment="Center" Margin="10,0,0,0" MinWidth="40"/>
+                </Grid>
 
-        <StackPanel Grid.Row="6" Orientation="Horizontal" HorizontalAlignment="Right">
-            <Button x:Name="RemoveSelectedButton" Content="選択を削除" Click="RemoveSelectedButton_Click" Margin="0,0,8,0" Style="{DynamicResource MaterialDesignFlatButton}"/>
-            <Button x:Name="ClearListButton" Content="すべてクリア" Click="ClearListButton_Click" Style="{DynamicResource MaterialDesignFlatButton}"/>
-        </StackPanel>
-
-        <Grid Grid.Row="8">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="Auto"/>
-            </Grid.ColumnDefinitions>
-
-            <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-                <TextBox x:Name="OutputFolderTextBox" Width="300" Margin="5,0" IsReadOnly="True"
-                         Style="{DynamicResource MaterialDesignOutlinedTextBox}"
-                         materialDesign:HintAssist.Hint="出力先フォルダ"
-                         VerticalAlignment="Bottom"/>
-                <!-- ▼▼▼ このボタンのスタイルを修正 ▼▼▼ -->
-                <Button x:Name="SelectOutputFolderButton" Content="{materialDesign:PackIcon FolderOpen}"
-                        Click="SelectOutputFolderButton_Click" Style="{DynamicResource MaterialDesignIconButton}"
-                        ToolTip="出力先フォルダを選択"/>
-            </StackPanel>
-
-            <Button x:Name="StartConversionButton" Grid.Column="1" Content="変換開始" Width="150" Height="40"
-                    HorizontalAlignment="Right" Click="StartConversionButton_Click"
-                    Style="{DynamicResource MaterialDesignRaisedButton}">
-                <Button.ContentTemplate>
-                    <DataTemplate>
+                <StackPanel Grid.Row="4" Orientation="Horizontal" Margin="0,0,0,10">
+                    <Button x:Name="SelectFileButton" Click="SelectFileButton_Click" Margin="0,0,8,0" Style="{DynamicResource MaterialDesignOutlinedButton}">
                         <StackPanel Orientation="Horizontal">
-                            <materialDesign:PackIcon Kind="Play" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                            <TextBlock Text="{Binding}"/>
+                            <materialDesign:PackIcon Kind="File" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                            <TextBlock Text="ファイルを選択"/>
                         </StackPanel>
-                    </DataTemplate>
-                </Button.ContentTemplate>
-            </Button>
+                    </Button>
+                    <Button x:Name="SelectFolderButton" Click="SelectFolderButton_Click" Margin="0,0,8,0" Style="{DynamicResource MaterialDesignOutlinedButton}">
+                        <StackPanel Orientation="Horizontal">
+                            <materialDesign:PackIcon Kind="Folder" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                            <TextBlock Text="フォルダを選択"/>
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+
+                <materialDesign:Card Grid.Row="5" UniformCornerRadius="8" Padding="0" AllowDrop="True" Drop="FileList_Drop" DragOver="FileList_DragOver" Margin="0,0,0,10">
+                    <DataGrid x:Name="FileList" ItemsSource="{Binding SourceFiles}" SelectionMode="Extended" AutoGenerateColumns="False" CanUserAddRows="False" CanUserResizeRows="False"
+                              materialDesign:DataGridAssist.CellPadding="13 8 8 8" materialDesign:DataGridAssist.ColumnHeaderPadding="8" IsReadOnly="True" Background="White" MinHeight="150">
+                        <DataGrid.Columns>
+                            <DataGridTemplateColumn>
+                                <DataGridTemplateColumn.Header>
+                                    <CheckBox x:Name="SelectAllCheckBox" Checked="SelectAllCheckBox_Checked" Unchecked="SelectAllCheckBox_Unchecked" />
+                                </DataGridTemplateColumn.Header>
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock HorizontalAlignment="Center"><CheckBox IsChecked="{Binding IsSelected, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center"/></TextBlock>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTextColumn Header="ファイル名" Binding="{Binding FileName}" Width="200"/>
+                            <DataGridTextColumn Header="時間" Binding="{Binding Duration}" Width="80"/>
+                            <DataGridTextColumn Header="映像コーデック" Binding="{Binding VideoCodec}" Width="100"/>
+                            <DataGridTextColumn Header="音声コーデック" Binding="{Binding AudioCodec}" Width="100"/>
+                            <DataGridTextColumn Header="状態" Binding="{Binding Status}" Width="150"/>
+                            <DataGridTextColumn Header="フルパス" Binding="{Binding FullPath}" Width="*"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </materialDesign:Card>
+
+                <StackPanel Grid.Row="6" Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button x:Name="RemoveSelectedButton" Content="選択を削除" Click="RemoveSelectedButton_Click" Margin="0,0,8,0" Style="{DynamicResource MaterialDesignFlatButton}"/>
+                    <Button x:Name="ClearListButton" Content="すべてクリア" Click="ClearListButton_Click" Style="{DynamicResource MaterialDesignFlatButton}"/>
+                </StackPanel>
+
+                <Grid Grid.Row="7" VerticalAlignment="Bottom">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBox x:Name="OutputFolderTextBox" Width="300" Margin="5,0" IsReadOnly="True" Style="{DynamicResource MaterialDesignOutlinedTextBox}"
+                                 materialDesign:HintAssist.Hint="出力先フォルダ" VerticalAlignment="Bottom"/>
+                        <Button x:Name="SelectOutputFolderButton" Content="{materialDesign:PackIcon FolderOpen}" Click="SelectOutputFolderButton_Click" Style="{DynamicResource MaterialDesignIconButton}" ToolTip="出力先フォルダを選択"/>
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
+                        <Button x:Name="OpenSettingsButton" Click="OpenSettingsButton_Click" Style="{StaticResource MaterialDesignFloatingActionMiniButton}" ToolTip="変換設定を開く" Margin="0,0,10,0">
+                            <materialDesign:PackIcon Kind="Cog" />
+                        </Button>
+                        <Button x:Name="StartConversionButton" Content="変換開始" Width="150" Height="40" Click="StartConversionButton_Click" Style="{DynamicResource MaterialDesignRaisedButton}">
+                            <Button.ContentTemplate>
+                                <DataTemplate>
+                                    <StackPanel Orientation="Horizontal">
+                                        <materialDesign:PackIcon Kind="Play" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                        <TextBlock Text="{Binding}"/>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </Button.ContentTemplate>
+                        </Button>
+                    </StackPanel>
+                </Grid>
+
+                <materialDesign:Card Grid.Row="9" UniformCornerRadius="8" Padding="5">
+                    <TextBox x:Name="FFmpegOutputLog" IsReadOnly="True" TextWrapping="NoWrap" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
+                             FontFamily="Consolas, Meiryo" materialDesign:TextFieldAssist.DecorationVisibility="Collapsed" BorderThickness="0" Text="ここにFFmpegの出力が表示されます..."/>
+                </materialDesign:Card>
+            </Grid>
+
+            <!-- ===== オーバーレイコンテンツ ===== -->
+            <Grid x:Name="SettingsOverlay"
+                  Visibility="Collapsed"
+                  Background="#80000000"
+                  MouseDown="SettingsOverlay_MouseDown">
+
+                <materialDesign:Card Width="600"
+                                     HorizontalAlignment="Center"
+                                     VerticalAlignment="Center"
+                                     Padding="20"
+                                     UniformCornerRadius="8">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+
+                        <Grid Grid.Row="0" Margin="0,0,0,20">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                                <materialDesign:PackIcon Kind="Cog" VerticalAlignment="Center" Margin="0,0,10,0" Width="24" Height="24"/>
+                                <TextBlock Text="変換設定" Style="{DynamicResource MaterialDesignHeadline6TextBlock}" VerticalAlignment="Center"/>
+                            </StackPanel>
+
+                            <Button x:Name="CloseSettingsButton" Click="CloseSettingsButton_Click"
+                                    Grid.Column="1"
+                                    Style="{StaticResource MaterialDesignIconButton}"
+                                    ToolTip="閉じる">
+                                <materialDesign:PackIcon Kind="Close"/>
+                            </Button>
+                        </Grid>
+
+                        <Grid Grid.Row="1">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+
+                            <!-- 映像設定 -->
+                            <ComboBox Grid.Row="0" Grid.Column="0" Margin="5" materialDesign:HintAssist.Hint="ハードウェアエンコーダー" Style="{StaticResource MaterialDesignOutlinedComboBox}">
+                                <ComboBoxItem Content="CPU"/>
+                                <ComboBoxItem Content="GPU (Intel)"/>
+                                <ComboBoxItem Content="GPU (NVIDIA)"/>
+                                <ComboBoxItem Content="GPU (AMD)"/>
+                            </ComboBox>
+                            <ComboBox Grid.Row="0" Grid.Column="1" Margin="5" materialDesign:HintAssist.Hint="フォーマット" Style="{StaticResource MaterialDesignOutlinedComboBox}">
+                                <ComboBoxItem Content="H.264"/>
+                                <ComboBoxItem Content="H.265"/>
+                                <ComboBoxItem Content="WebM"/>
+                            </ComboBox>
+
+                            <!-- 音声設定 -->
+                            <ComboBox Grid.Row="1" Grid.Column="0" Margin="5" materialDesign:HintAssist.Hint="音声フォーマット" Style="{StaticResource MaterialDesignOutlinedComboBox}">
+                                <ComboBoxItem Content="継承"/>
+                                <ComboBoxItem Content="AAC"/>
+                                <ComboBoxItem Content="Opus"/>
+                            </ComboBox>
+                            <ComboBox Grid.Row="1" Grid.Column="1" Margin="5" materialDesign:HintAssist.Hint="音声ビットレート" Style="{StaticResource MaterialDesignOutlinedComboBox}">
+                                <ComboBoxItem Content="継承"/>
+                                <ComboBoxItem Content="128kbps"/>
+                                <ComboBoxItem Content="192kbps"/>
+                                <ComboBoxItem Content="256kbps"/>
+                            </ComboBox>
+
+                            <!-- レート/フレーム設定 -->
+                            <StackPanel Grid.Row="2" Grid.Column="0" Margin="5">
+                                <TextBlock Text="レート制御" Style="{DynamicResource MaterialDesignCaptionTextBlock}" Margin="5,0,0,0"/>
+                                <StackPanel Orientation="Horizontal" Margin="0,5,0,0">
+                                    <RadioButton Content="品質" GroupName="RateControl" IsChecked="True" VerticalAlignment="Center"/>
+                                    <RadioButton Content="ターゲットビットレート" GroupName="RateControl" VerticalAlignment="Center" Margin="10,0,0,0"/>
+                                </StackPanel>
+                                <TextBox Margin="0,5,0,0" materialDesign:HintAssist.Hint="品質値(例:23) or ビットレート(例:4000k)" Style="{StaticResource MaterialDesignOutlinedTextBox}"/>
+                            </StackPanel>
+                            <ComboBox Grid.Row="2" Grid.Column="1" Margin="5" materialDesign:HintAssist.Hint="フレームレート" Style="{StaticResource MaterialDesignOutlinedComboBox}" VerticalAlignment="Bottom">
+                                <ComboBoxItem Content="継承"/>
+                                <ComboBoxItem Content="24"/>
+                                <ComboBoxItem Content="30"/>
+                                <ComboBoxItem Content="60"/>
+                            </ComboBox>
+                        </Grid>
+                    </Grid>
+                </materialDesign:Card>
+            </Grid>
+
         </Grid>
 
-        <materialDesign:Card Grid.Row="10" UniformCornerRadius="8" Padding="5">
-            <TextBox x:Name="FFmpegOutputLog"
-                     IsReadOnly="True"
-                     TextWrapping="NoWrap"
-                     AcceptsReturn="True"
-                     VerticalScrollBarVisibility="Auto"
-                     HorizontalScrollBarVisibility="Auto"
-                     FontFamily="Consolas, Meiryo"
-                     materialDesign:TextFieldAssist.DecorationVisibility="Collapsed"
-                     BorderThickness="0"
-                     Text="ここにFFmpegの出力が表示されます..."/>
-        </materialDesign:Card>
-    </Grid>
+    </materialDesign:DialogHost>
 </Window>
