@@ -130,7 +130,11 @@ namespace ffmpeg
                     {
                         outputPathForFile = Path.Combine(outputFolder, $"{originalFileName} ({counter++}){extension}");
                     }
-                    this.Dispatcher.Invoke(() => { fileInfo.Status = "変換中..."; });
+                    this.Dispatcher.Invoke(() =>
+                    {
+                        StatusTextBlock.Text = "変換を開始しました";
+                        fileInfo.Status = "変換中...";
+                    });
 
                     // ★★★ ここからが修正されたログ処理コールバック ★★★
                     Action<string> outputLogCallback = (log) =>
@@ -201,7 +205,7 @@ namespace ffmpeg
             }
             this.Dispatcher.Invoke(() =>
             {
-                StatusTextBlock.Text = globalCancellationToken.IsCancellationRequested ? "変換がキャンセルされました。" : "すべての変換が完了しました。";
+                StatusTextBlock.Text = globalCancellationToken.IsCancellationRequested ? "変換がキャンセルされました" : "すべての変換が完了しました";
             });
             this.Dispatcher.Invoke(() => SetUiForConversion(false));
             _globalConversionCts?.Dispose();

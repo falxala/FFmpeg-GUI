@@ -3,10 +3,19 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:materialDesign="http://materialdesigninxaml.net/winfx/xaml/themes"
         mc:Ignorable="d"
-        Title="FFmpeg GUI" Height="700" Width="900">
+        Title="FFmpeg GUI" Height="700" Width="900"
+        TextElement.Foreground="{DynamicResource MaterialDesignBody}"
+        TextElement.FontWeight="Regular"
+        TextElement.FontSize="13"
+        TextOptions.TextFormattingMode="Ideal"
+        TextOptions.TextRenderingMode="Auto"
+        Background="{DynamicResource MaterialDesignPaper}"
+        FontFamily="{DynamicResource MaterialDesignFont}"
+        Style="{DynamicResource MaterialDesignWindow}">
 
-    <Grid Margin="15">
+    <Grid Margin="16">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <!-- Status Text -->
@@ -14,7 +23,7 @@
             <!-- Overall Progress Text -->
             <RowDefinition Height="Auto"/>
             <!-- Current File Progress Bar -->
-            <RowDefinition Height="10"/>
+            <RowDefinition Height="20"/>
             <!-- Spacer -->
             <RowDefinition Height="Auto"/>
             <!-- Input Buttons -->
@@ -22,7 +31,7 @@
             <!-- File List -->
             <RowDefinition Height="Auto"/>
             <!-- List Controls -->
-            <RowDefinition Height="10"/>
+            <RowDefinition Height="20"/>
             <!-- Spacer -->
             <RowDefinition Height="Auto"/>
             <!-- Conversion Controls -->
@@ -32,85 +41,122 @@
             <!-- FFmpeg Output Log -->
         </Grid.RowDefinitions>
 
-        <TextBlock x:Name="StatusTextBlock" Grid.Row="0" TextWrapping="Wrap" 
-                   Margin="0,0,0,5" VerticalAlignment="Top" HorizontalAlignment="Left"
-                   Text="FFmpegの存在を確認中..."/>
+        <!-- ステータス表示をCardで囲み、テーマのプライマリカラーを背景にする -->
+        <materialDesign:Card Grid.Row="0"
+                             Background="{DynamicResource {x:Static SystemColors.ControlLightLightBrushKey}}"
+                             Padding="10"
+                             Margin="0,0,0,10"
+                             UniformCornerRadius="4">
+            <TextBlock x:Name="StatusTextBlock"
+                       Style="{DynamicResource MaterialDesignSubtitle1TextBlock}"
+                       Foreground="{DynamicResource {x:Static SystemColors.ControlDarkDarkBrushKey}}"
+                       HorizontalAlignment="Center"
+                       Text="FFmpegの存在を確認中..." FontWeight="Bold" />
+        </materialDesign:Card>
 
-        <TextBlock x:Name="OverallProgressTextBlock" Grid.Row="1" TextWrapping="Wrap" 
-                   Margin="0,0,0,10" VerticalAlignment="Top" HorizontalAlignment="Left"
+        <TextBlock x:Name="OverallProgressTextBlock" Grid.Row="1"
+                   Margin="0,0,0,10"
+                   Style="{DynamicResource MaterialDesignHeadline6TextBlock}"
                    Text="全体進捗: 0/0 (0%)"/>
 
-        <Grid x:Name="CurrentFileProgressGrid" Grid.Row="2" Margin="0,0,0,5" Visibility="Collapsed">
+        <Grid x:Name="CurrentFileProgressGrid" Grid.Row="2" Margin="0,5,0,5" Visibility="Collapsed">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
-            <TextBlock Grid.Column="0" Text="現在のファイル進捗: " VerticalAlignment="Center" Margin="0,0,5,0"/>
-            <ProgressBar x:Name="CurrentFileProgressBar" Grid.Column="1" Height="20" VerticalAlignment="Center"/>
-            <TextBlock x:Name="CurrentFileProgressTextBlock" Grid.Column="2" Text="0.0%" VerticalAlignment="Center" Margin="5,0,0,0" MinWidth="40"/>
+            <TextBlock Grid.Column="0" Text="現在のファイル進捗: " VerticalAlignment="Center" Margin="0,0,10,0"/>
+            <ProgressBar x:Name="CurrentFileProgressBar" Grid.Column="1" VerticalAlignment="Center" Height="10" Background="#FFECECEC" Cursor=""/>
+            <TextBlock x:Name="CurrentFileProgressTextBlock" Grid.Column="2" Text="0.0%" VerticalAlignment="Center" Margin="10,0,0,0" MinWidth="40"/>
         </Grid>
 
-        <StackPanel Grid.Row="4" Orientation="Horizontal" Margin="0,10,0,10">
-            <Button x:Name="SelectFileButton" Content="ファイルを選択..." Click="SelectFileButton_Click" Width="120" Height="30" Margin="0,0,10,0"/>
-            <Button x:Name="SelectFolderButton" Content="フォルダを選択..." Click="SelectFolderButton_Click" Width="120" Height="30" Margin="0,0,10,0"/>
+        <StackPanel Grid.Row="4" Orientation="Horizontal" Margin="0,0,0,10">
+            <Button x:Name="SelectFileButton" Click="SelectFileButton_Click" Margin="0,0,8,0"
+                    Style="{DynamicResource MaterialDesignOutlinedButton}">
+                <StackPanel Orientation="Horizontal">
+                    <materialDesign:PackIcon Kind="File" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <TextBlock Text="ファイルを選択"/>
+                </StackPanel>
+            </Button>
+            <Button x:Name="SelectFolderButton" Click="SelectFolderButton_Click" Margin="0,0,8,0"
+                    Style="{DynamicResource MaterialDesignOutlinedButton}">
+                <StackPanel Orientation="Horizontal">
+                    <materialDesign:PackIcon Kind="Folder" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <TextBlock Text="フォルダを選択"/>
+                </StackPanel>
+            </Button>
         </StackPanel>
 
-        <Border Grid.Row="5" BorderBrush="LightGray" BorderThickness="1" CornerRadius="5" Padding="5" 
-                AllowDrop="True" Drop="FileList_Drop" DragOver="FileList_DragOver" Margin="0,0,0,10">
-            <ListView x:Name="FileList" ItemsSource="{Binding SourceFiles}" SelectionMode="Extended">
-                <ListView.View>
-                    <GridView>
-                        <GridViewColumn Width="40">
-                            <GridViewColumn.HeaderTemplate>
-                                <DataTemplate>
-                                    <CheckBox x:Name="SelectAllCheckBox" 
-                                              Checked="SelectAllCheckBox_Checked" 
-                                              Unchecked="SelectAllCheckBox_Unchecked" />
-                                </DataTemplate>
-                            </GridViewColumn.HeaderTemplate>
-                            <GridViewColumn.CellTemplate>
-                                <DataTemplate>
+        <materialDesign:Card Grid.Row="5" UniformCornerRadius="8" Padding="0"
+                             AllowDrop="True" Drop="FileList_Drop" DragOver="FileList_DragOver" Margin="0,0,0,10">
+            <DataGrid x:Name="FileList" ItemsSource="{Binding SourceFiles}" SelectionMode="Extended"
+                      AutoGenerateColumns="False" CanUserAddRows="False" CanUserResizeRows="False"
+                      materialDesign:DataGridAssist.CellPadding="13 8 8 8"
+                      materialDesign:DataGridAssist.ColumnHeaderPadding="8"
+                      IsReadOnly="True" Background="White">
+                <DataGrid.Columns>
+                    <DataGridTemplateColumn>
+                        <DataGridTemplateColumn.Header>
+                            <CheckBox x:Name="SelectAllCheckBox" 
+                                      Checked="SelectAllCheckBox_Checked" 
+                                      Unchecked="SelectAllCheckBox_Unchecked" />
+                        </DataGridTemplateColumn.Header>
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <TextBlock HorizontalAlignment="Center">
                                     <CheckBox IsChecked="{Binding IsSelected, UpdateSourceTrigger=PropertyChanged}" 
-                                              HorizontalAlignment="Center" 
                                               VerticalAlignment="Center"/>
-                                </DataTemplate>
-                            </GridViewColumn.CellTemplate>
-                        </GridViewColumn>
-                        <GridViewColumn Header="ファイル名" DisplayMemberBinding="{Binding FileName}" Width="200"/>
-                        <GridViewColumn Header="時間" DisplayMemberBinding="{Binding Duration}" Width="80"/>
-                        <GridViewColumn Header="映像コーデック" DisplayMemberBinding="{Binding VideoCodec}" Width="100"/>
-                        <GridViewColumn Header="音声コーデック" DisplayMemberBinding="{Binding AudioCodec}" Width="100"/>
-                        <GridViewColumn Header="状態" DisplayMemberBinding="{Binding Status}" Width="150"/>
-                        <GridViewColumn Header="フルパス" DisplayMemberBinding="{Binding FullPath}" Width="300"/>
-                    </GridView>
-                </ListView.View>
-            </ListView>
-        </Border>
+                                </TextBlock>
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+                    <DataGridTextColumn Header="ファイル名" Binding="{Binding FileName}" Width="200"/>
+                    <DataGridTextColumn Header="時間" Binding="{Binding Duration}" Width="80"/>
+                    <DataGridTextColumn Header="映像コーデック" Binding="{Binding VideoCodec}" Width="100"/>
+                    <DataGridTextColumn Header="音声コーデック" Binding="{Binding AudioCodec}" Width="100"/>
+                    <DataGridTextColumn Header="状態" Binding="{Binding Status}" Width="150"/>
+                    <DataGridTextColumn Header="フルパス" Binding="{Binding FullPath}" Width="*"/>
+                </DataGrid.Columns>
+            </DataGrid>
+        </materialDesign:Card>
 
         <StackPanel Grid.Row="6" Orientation="Horizontal" HorizontalAlignment="Right">
-            <Button x:Name="RemoveSelectedButton" Content="選択を削除" Click="RemoveSelectedButton_Click" Width="100" Height="30" Margin="0,0,10,0"/>
-            <Button x:Name="ClearListButton" Content="全てクリア" Click="ClearListButton_Click" Width="100" Height="30"/>
+            <Button x:Name="RemoveSelectedButton" Content="選択を削除" Click="RemoveSelectedButton_Click" Margin="0,0,8,0" Style="{DynamicResource MaterialDesignFlatButton}"/>
+            <Button x:Name="ClearListButton" Content="すべてクリア" Click="ClearListButton_Click" Style="{DynamicResource MaterialDesignFlatButton}"/>
         </StackPanel>
 
-        <Grid Grid.Row="8" Margin="0,10,0,0">
+        <Grid Grid.Row="8">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
 
             <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-                <TextBlock Text="出力先フォルダ: " VerticalAlignment="Center"/>
-                <TextBox x:Name="OutputFolderTextBox" Width="300" Margin="5,0" VerticalAlignment="Center" IsReadOnly="True"/>
-                <Button x:Name="SelectOutputFolderButton" Content="..." Click="SelectOutputFolderButton_Click" Width="40" Height="24"/>
+                <TextBox x:Name="OutputFolderTextBox" Width="300" Margin="5,0" IsReadOnly="True"
+                         Style="{DynamicResource MaterialDesignOutlinedTextBox}"
+                         materialDesign:HintAssist.Hint="出力先フォルダ"
+                         VerticalAlignment="Bottom"/>
+                <!-- ▼▼▼ このボタンのスタイルを修正 ▼▼▼ -->
+                <Button x:Name="SelectOutputFolderButton" Content="{materialDesign:PackIcon FolderOpen}"
+                        Click="SelectOutputFolderButton_Click" Style="{DynamicResource MaterialDesignIconButton}"
+                        ToolTip="出力先フォルダを選択"/>
             </StackPanel>
 
-            <Button x:Name="StartConversionButton" Grid.Column="1" Content="変換開始" Width="150" Height="40" 
-                    HorizontalAlignment="Right" Click="StartConversionButton_Click" />
+            <Button x:Name="StartConversionButton" Grid.Column="1" Content="変換開始" Width="150" Height="40"
+                    HorizontalAlignment="Right" Click="StartConversionButton_Click"
+                    Style="{DynamicResource MaterialDesignRaisedButton}">
+                <Button.ContentTemplate>
+                    <DataTemplate>
+                        <StackPanel Orientation="Horizontal">
+                            <materialDesign:PackIcon Kind="Play" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                            <TextBlock Text="{Binding}"/>
+                        </StackPanel>
+                    </DataTemplate>
+                </Button.ContentTemplate>
+            </Button>
         </Grid>
 
-        <Border Grid.Row="10" BorderBrush="LightGray" BorderThickness="1" CornerRadius="5" Padding="5" Margin="0,10,0,0">
-            <!-- ★★★ TextChanged イベントハンドラを削除 ★★★ -->
+        <materialDesign:Card Grid.Row="10" UniformCornerRadius="8" Padding="5">
             <TextBox x:Name="FFmpegOutputLog"
                      IsReadOnly="True"
                      TextWrapping="NoWrap"
@@ -118,7 +164,9 @@
                      VerticalScrollBarVisibility="Auto"
                      HorizontalScrollBarVisibility="Auto"
                      FontFamily="Consolas, Meiryo"
+                     materialDesign:TextFieldAssist.DecorationVisibility="Collapsed"
+                     BorderThickness="0"
                      Text="ここにFFmpegの出力が表示されます..."/>
-        </Border>
+        </materialDesign:Card>
     </Grid>
 </Window>
