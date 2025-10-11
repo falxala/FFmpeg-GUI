@@ -17,13 +17,11 @@ namespace ffmpeg.Services
 {
     public class FfmpegManager
     {
-        // 定数 (変更なし)
         private const string FFMPEG_DOWNLOAD_URL = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-full.7z";
         private const string FFMPEG_ROOT_DIR_RELATIVE = "ffmpeg";
         private const string FFMPEG_EXE_RELATIVE_PATH = "bin\\ffmpeg.exe";
         private const string SEVEN_ZA_EXE_RELATIVE_PATH = "Tools\\7za.exe";
 
-        // プロパティ (変更なし)
         public string FfmpegExePath { get; }
         public string FfprobeExePath { get; }
         public string SevenZaExePath { get; }
@@ -41,7 +39,6 @@ namespace ffmpeg.Services
         public bool CheckSevenZaExists() => File.Exists(SevenZaExePath);
         public bool CheckFfmpegExists() => File.Exists(FfmpegExePath) && File.Exists(FfprobeExePath);
 
-        // DownloadAndExtractFfmpegAsync (ステータス進捗報告をMainWindowに移管、ダウンロード進捗は残す)
         public async Task DownloadAndExtractFfmpegAsync(IProgress<string> statusProgress, IProgress<double> downloadProgress)
         {
             string downloadFilePath = Path.Combine(AppDirectory, "ffmpeg.7z");
@@ -55,7 +52,6 @@ namespace ffmpeg.Services
             }
             Directory.CreateDirectory(extractDirectory);
 
-            // ダウンロード
             statusProgress.Report($"FFmpegをダウンロード中...");
             using (var client = new HttpClient())
             {
@@ -79,15 +75,13 @@ namespace ffmpeg.Services
                     }
                 }
             }
-            downloadProgress.Report(0); // プログレスバーをリセット
+            downloadProgress.Report(0);
 
-            // 解凍
             statusProgress.Report("FFmpegを解凍中...");
             await RunSevenZaAsync(downloadFilePath, extractDirectory);
 
             if (File.Exists(downloadFilePath)) File.Delete(downloadFilePath);
 
-            // ディレクトリ構造の調整
             string[] extractedSubDirs = Directory.GetDirectories(extractDirectory);
             if (extractedSubDirs.Length == 1)
             {
@@ -126,12 +120,11 @@ namespace ffmpeg.Services
             }
         }
 
-        // IProgress<T> を削除し、Action<string> を受け取るように変更
         public async Task ConvertFileAsync(
-            SourceFileInfo fileToConvert,
-            string outputPath,
-            Action<string> outputLogCallback, // FFmpegの生出力を報告するためのコールバック
-            CancellationToken cancellationToken)
+                    SourceFileInfo fileToConvert,
+                    string outputPath,
+                    Action<string> outputLogCallback,
+                    CancellationToken cancellationToken)
         {
             if (!CheckFfmpegExists())
             {
@@ -155,32 +148,15 @@ namespace ffmpeg.Services
             }
 
             var arguments = new StringBuilder();
-            // 入力ファイルを指定
+            // ★★★ 変更点：進捗報告用の引数を追加 ★★★
+            arguments.Append("-progress pipe:2 ");
+
             arguments.Append($"-i \"{fileToConvert.FullPath}\" ");
-
-            // ビデオオプション
-            if (hasVideo)
-            {
-                arguments.Append("-c:v libx264 -preset medium -crf 23 -pix_fmt yuv420p ");
-            }
-            else
-            {
-                arguments.Append("-vn "); // 映像ストリームなし
-            }
-
-            // オーディオオプション
-            if (hasAudio)
-            {
-                arguments.Append("-c:a aac -b:a 192k ");
-            }
-            else
-            {
-                arguments.Append("-an "); // 音声ストリームなし
-            }
-
-            // 出力ファイルを指定し、既存ファイルを上書き
+            if (hasVideo) arguments.Append("-c:v libx264 -preset medium -crf 23 -pix_fmt yuv420p ");
+            else arguments.Append("-vn ");
+            if (hasAudio) arguments.Append("-c:a aac -b:a 192k ");
+            else arguments.Append("-an ");
             arguments.Append($"\"{outputPath}\" -y");
-
             string fullArguments = arguments.ToString();
 
             outputLogCallback($"--- {fileToConvert.FileName} の変換開始 ---{Environment.NewLine}");
@@ -190,55 +166,38 @@ namespace ffmpeg.Services
             {
                 FileName = FfmpegExePath,
                 Arguments = fullArguments,
-                RedirectStandardOutput = false, // 標準出力は通常使わない
-                RedirectStandardError = true,   // FFmpegのログは標準エラーに出力される
+                RedirectStandardError = true,
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 StandardErrorEncoding = Encoding.UTF8
             };
 
             using var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
-
             var tcs = new TaskCompletionSource<int>();
 
             using var registration = cancellationToken.Register(() =>
             {
-                try
-                {
-                    if (!process.HasExited)
-                    {
-                        process.Kill(true);
-                    }
-                }
-                catch (Exception) { /* プロセスが既に終了している場合などのエラーは無視 */ }
+                try { if (!process.HasExited) process.Kill(true); } catch { }
                 tcs.TrySetCanceled(cancellationToken);
             });
 
             process.Exited += (sender, args) =>
             {
-                if (cancellationToken.IsCancellationRequested)
-                {
-                    tcs.TrySetCanceled(cancellationToken);
-                }
-                else
-                {
-                    tcs.TrySetResult(process.ExitCode);
-                }
+                tcs.TrySetResult(cancellationToken.IsCancellationRequested ? -1 : process.ExitCode);
             };
 
             process.ErrorDataReceived += (sender, args) =>
             {
-                if (string.IsNullOrEmpty(args.Data)) return;
-                // ここでFFmpegの生出力を直接コールバックに渡す
-                outputLogCallback($"{args.Data}{Environment.NewLine}");
+                if (args.Data != null)
+                {
+                    outputLogCallback($"{args.Data}{Environment.NewLine}");
+                }
             };
 
             process.Start();
             process.BeginErrorReadLine();
 
-            await tcs.Task; // プロセス終了またはキャンセルまで待機
-
-            process.WaitForExit(); // プロセスが完全に終了するまで待機
+            await tcs.Task;
 
             if (!cancellationToken.IsCancellationRequested && process.ExitCode != 0)
             {
@@ -247,7 +206,6 @@ namespace ffmpeg.Services
             outputLogCallback($"--- {fileToConvert.FileName} の変換終了 (Exit Code: {process.ExitCode}) ---{Environment.NewLine}{Environment.NewLine}");
         }
 
-        // FfprobeFileAsync は変更なし
         public async Task<SourceFileInfo?> ProbeFileAsync(string filePath)
         {
             if (!CheckFfmpegExists()) return null;
@@ -274,15 +232,13 @@ namespace ffmpeg.Services
             {
                 Task<string> readOutputTask = process.StandardOutput.ReadToEndAsync();
                 Task<string> readErrorTask = process.StandardError.ReadToEndAsync();
-
                 await process.WaitForExitAsync(cts.Token);
-
                 jsonOutput = await readOutputTask;
                 errorOutput = await readErrorTask;
             }
             catch (OperationCanceledException)
             {
-                try { if (!process.HasExited) process.Kill(); } catch { /* 無視 */ }
+                try { if (!process.HasExited) process.Kill(); } catch { }
                 return new SourceFileInfo { Duration = "Timeout", Container = "Timeout", VideoCodec = "Timeout", AudioCodec = "Timeout", RawDurationSeconds = 0 };
             }
 
@@ -303,13 +259,8 @@ namespace ffmpeg.Services
                     jsonOutput = Regex.Replace(jsonOutput, @",\s*""tags""\s*:\s*\{.*?\}\s*(?=\})", "", RegexOptions.Singleline);
                     jsonOutput = Regex.Replace(jsonOutput, @"""tags""\s*:\s*\{.*?\}\s*,?", "", RegexOptions.Singleline);
                 }
-
                 var ffprobeData = JsonConvert.DeserializeObject<FfprobeOutput>(jsonOutput);
-
-                if (ffprobeData == null)
-                {
-                    throw new JsonException("Deserialized ffprobe data is null.");
-                }
+                if (ffprobeData == null) throw new JsonException("Deserialized ffprobe data is null.");
 
                 var probedInfo = new SourceFileInfo();
                 probedInfo.Container = ffprobeData.Format?.FormatName ?? "N/A";
@@ -327,7 +278,6 @@ namespace ffmpeg.Services
 
                 probedInfo.VideoCodec = ffprobeData.Streams?.FirstOrDefault(s => s.CodecType == "video")?.CodecName ?? "N/A";
                 probedInfo.AudioCodec = ffprobeData.Streams?.FirstOrDefault(s => s.CodecType == "audio")?.CodecName ?? "N/A";
-
                 return probedInfo;
             }
             catch (JsonException)

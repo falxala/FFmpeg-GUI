@@ -12,28 +12,18 @@ namespace ffmpeg.Models
         private bool _isSelected;
         private string _fileName = string.Empty;
         private string _fullPath = string.Empty;
-        private string _duration = "Probing..."; // 初期値を設定
+        private string _duration = "Probing...";
         private string _container = "Probing...";
         private string _videoCodec = "Probing...";
         private string _audioCodec = "Probing...";
         private string _status = "待機中";
-        // private double _progress = 0; // プログレスバーを削除するため、このプロパティも削除
-        private double _rawDurationSeconds = 0; // 正確な秒数を格納するプロパティ
+        private double _rawDurationSeconds = 0;
 
         public string Status
         {
             get => _status;
             set => SetField(ref _status, value);
         }
-
-        // Progress プロパティは削除
-        /*
-        public double Progress
-        {
-            get => _progress;
-            set => SetField(ref _progress, value);
-        }
-        */
 
         public string FileName
         {
@@ -94,7 +84,6 @@ namespace ffmpeg.Models
             return FullPath.GetHashCode(StringComparison.OrdinalIgnoreCase);
         }
 
-        // INotifyPropertyChangedの実装
         public event PropertyChangedEventHandler? PropertyChanged;
 
         protected void OnPropertyChanged([CallerMemberName] string? propertyName = null)
